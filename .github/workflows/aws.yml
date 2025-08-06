@@ -18,7 +18,7 @@ jobs:
   build-and-push:
     name: Build and Push Docker Image
     runs-on: ubuntu-latest
-    environment: production  # ต้องระบุ environment ถ้า secrets อยู่ใน environment
+    environment: test  # ต้องระบุ environment ถ้า secrets อยู่ใน environment
 
     steps:
     - name: Check Environment Variables and Secrets
