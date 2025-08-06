@@ -9,6 +9,7 @@ on:
 env:
   AWS_REGION: ap-southeast-1
   ECR_REPOSITORY: nhamaew/pet-store
+  AWS_ACCOUNT_ID: 149536482720
 
 permissions:
   contents: read
@@ -17,8 +18,7 @@ jobs:
   build-and-push:
     name: Build and Push Docker Image
     runs-on: ubuntu-latest
-    environment: 
-      name: test  # ต้องตรงกับชื่อ environment ใน GitHub
+    environment: production  # ต้องระบุ environment ถ้า secrets อยู่ใน environment
 
     steps:
     - name: Check Environment Variables and Secrets
@@ -27,26 +27,16 @@ jobs:
         echo "AWS_REGION: ${{ env.AWS_REGION }}"
         echo "ECR_REPOSITORY: ${{ env.ECR_REPOSITORY }}"
         
-        echo "=== Secrets Check ==="
-        if [ -z "${{ secrets.AWS_ACCESS_KEY_ID }}" ]; then
-          echo "❌ AWS_ACCESS_KEY_ID secret is NOT set"
-        else
-          echo "✅ AWS_ACCESS_KEY_ID secret is set"
-          echo "   Length: $(echo '${{ secrets.AWS_ACCESS_KEY_ID }}' | wc -c) characters"
-          echo "   Starts with: $(echo '${{ secrets.AWS_ACCESS_KEY_ID }}' | cut -c1-4)****"
-        fi
+        echo "=== Repository Secrets Check ==="
+        echo "AWS_ACCESS_KEY_ID (repo): ${{ secrets.AWS_ACCESS_KEY_ID && 'SET' || 'NOT SET' }}"
+        echo "AWS_SECRET_ACCESS_KEY (repo): ${{ secrets.AWS_SECRET_ACCESS_KEY && 'SET' || 'NOT SET' }}"
         
-        if [ -z "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ]; then
-          echo "❌ AWS_SECRET_ACCESS_KEY secret is NOT set"
-        else
-          echo "✅ AWS_SECRET_ACCESS_KEY secret is set"
-          echo "   Length: $(echo '${{ secrets.AWS_SECRET_ACCESS_KEY }}' | wc -c) characters"
-        fi
+        echo "=== Environment Info ==="
+        echo "Current environment: ${{ github.environment }}"
+        echo "Job environment: production"
         
-        echo "=== GitHub Context ==="
-        echo "Repository: ${{ github.repository }}"
-        echo "Branch: ${{ github.ref_name }}"
-        echo "Event: ${{ github.event_name }}"
+        echo "=== All Environment Variables ==="
+        printenv | grep -E "AWS_|GITHUB_" | sort
 
     - name: Checkout code
       uses: actions/checkout@v4
@@ -105,5 +95,19 @@ jobs:
         # Output image URI
         echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
 
+    - name: Deploy to AWS App Runner
+      run: |
+        # Get current service configuration
+        SERVICE_ARN="arn:aws:apprunner:${{ env.AWS_REGION }}:${{ env.AWS_ACCOUNT_ID }}:service/your-service-name"
+        
+        # Start a new deployment
+        aws apprunner start-deployment \
+          --service-arn $SERVICE_ARN \
+          --region ${{ env.AWS_REGION }}
+        
+        echo "✅ App Runner deployment initiated!"
+        echo "🚀 Service ARN: $SERVICE_ARN"
+        echo "📦 Image: $ECR_REGISTRY/$ECR_REPOSITORY:latest"
+
     - name: Image digest
-      run: echo "Image pushed successfully to ECR"
+      run: echo "Image pushed successfully to ECR and App Runner deployment started"
