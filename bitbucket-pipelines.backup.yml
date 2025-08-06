@@ -1,0 +1,153 @@
+image: node:20
+
+definitions:
+  services:
+    docker:
+      memory: 3072
+      
+  caches:
+    nodemodules: node_modules
+    
+  steps:
+    - step: &build-nextjs
+        name: Build Next.js Application
+        image: node:20
+        caches:
+          - nodemodules
+        script:
+          - echo "Installing dependencies..."
+          - rm -rf node_modules package-lock.json
+          - npm install
+          - echo "Building Next.js application..."
+          - npm run build
+          - echo "Build completed successfully"
+        artifacts:
+          - .next/**
+          - public/**
+          - package*.json
+          
+    - step: &build-and-push-ecr
+        name: Build Docker & Push to AWS ECR
+        image: atlassian/default-image:4
+        services:
+          - docker
+        size: 2x  # Use more memory for Docker builds
+        script:
+          # Install dependencies
+          - apt-get update
+          - apt-get install -y awscli jq
+          
+          - echo "Verifying environment variables..."
+          - |
+            if [ -z "$AWS_ACCESS_KEY_ID" ] || [ -z "$AWS_SECRET_ACCESS_KEY" ] || [ -z "$AWS_REGION" ] || [ -z "$ECR_REPOSITORY" ] || [ -z "$AWS_ACCOUNT_ID" ]; then
+              echo "Missing required environment variables"
+              echo "Required AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION ECR_REPOSITORY AWS_ACCOUNT_ID"
+              exit 1
+            fi
+          
+          # Configure AWS
+          - export AWS_DEFAULT_REGION=$AWS_REGION
+          - aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
+          - aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
+          - aws configure set default.region $AWS_REGION
+          
+          - echo "Testing AWS connection..."
+          - aws sts get-caller-identity
+          
+          - echo "Logging into ECR..."
+          - aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+          
+          - echo "Ensuring ECR repository exists..."
+          - |
+            aws ecr describe-repositories --repository-names $ECR_REPOSITORY --region $AWS_REGION 2>/dev/null || {
+              echo "Creating ECR repository $ECR_REPOSITORY"
+              aws ecr create-repository --repository-name $ECR_REPOSITORY --region $AWS_REGION
+            }
+          
+          # Set up image tags
+          - export IMAGE_TAG=${BITBUCKET_COMMIT:0:8}
+          - export ECR_REGISTRY=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+          - export FULL_IMAGE_URI=$ECR_REGISTRY/$ECR_REPOSITORY
+          
+          - echo "Building Docker image..."
+          - docker build -t $ECR_REPOSITORY:local .
+          - docker tag $ECR_REPOSITORY:local $FULL_IMAGE_URI:$IMAGE_TAG
+          - docker tag $ECR_REPOSITORY:local $FULL_IMAGE_URI:latest
+          
+          - |
+            if [ "$BITBUCKET_BRANCH" != "main" ]; then
+              BRANCH_TAG=$(echo $BITBUCKET_BRANCH | sed 's/[^a-zA-Z0-9]/-/g' | tr '[:upper:]' '[:lower:]')
+              docker tag $ECR_REPOSITORY:local $FULL_IMAGE_URI:$BRANCH_TAG
+              echo "Tagged with branch $BRANCH_TAG"
+            fi
+          
+          - echo "Pushing images to ECR..."
+          - docker push $FULL_IMAGE_URI:$IMAGE_TAG
+          - docker push $FULL_IMAGE_URI:latest
+          - |
+            if [ "$BITBUCKET_BRANCH" != "main" ]; then
+              BRANCH_TAG=$(echo $BITBUCKET_BRANCH | sed 's/[^a-zA-Z0-9]/-/g' | tr '[:upper:]' '[:lower:]')
+              docker push $FULL_IMAGE_URI:$BRANCH_TAG
+            fi
+          
+          - echo "Starting image security scan..."
+          - aws ecr start-image-scan --repository-name $ECR_REPOSITORY --image-id imageTag=$IMAGE_TAG --region $AWS_REGION || echo "Image scan failed to start"
+          
+          - echo "Getting image information..."
+          - aws ecr describe-images --repository-name $ECR_REPOSITORY --image-ids imageTag=$IMAGE_TAG --region $AWS_REGION --query 'imageDetails[0].[imageSizeInBytes,imagePushedAt]' --output table || true
+          
+          - echo "================================="
+          - echo "BUILD AND PUSH SUCCESSFUL!"
+          - echo "================================="
+          - echo "Repository $ECR_REPOSITORY"
+          - echo "Image URI $FULL_IMAGE_URI:$IMAGE_TAG" 
+          - echo "Latest URI $FULL_IMAGE_URI:latest"
+          - echo "Commit SHA $BITBUCKET_COMMIT"
+          - echo "Branch $BITBUCKET_BRANCH"
+          - echo "Build Time $(date)"
+          
+          # Save image URI for deployment steps
+          - echo "export IMAGE_URI=$FULL_IMAGE_URI:$IMAGE_TAG" >> image_info.sh
+        artifacts:
+          - image_info.sh
+
+pipelines:
+  default:
+    - step: *build-nextjs
+    - step: *build-and-push-ecr
+  
+  branches:
+    main:
+      - step: *build-nextjs
+      - step: 
+          <<: *build-and-push-ecr
+          name: Deploy to Production ECR
+          deployment: production
+    
+    develop:
+      - step: *build-nextjs  
+      - step: 
+          <<: *build-and-push-ecr
+          name: Deploy to Development ECR
+          deployment: staging
+    
+    'release/*':
+      - step: *build-nextjs
+      - step: 
+          <<: *build-and-push-ecr
+          name: Release Build to ECR
+          
+  pull-requests:
+    '**':
+      - step: *build-nextjs
+      - step: 
+          <<: *build-and-push-ecr
+          name: PR Build and Push for Testing
+
+  tags:
+    'v*':
+      - step: *build-nextjs
+      - step: 
+          <<: *build-and-push-ecr
+          name: Tagged Release to ECR
+          deployment: production

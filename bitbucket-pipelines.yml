@@ -1,0 +1,50 @@
+image: node:20
+
+definitions:
+  steps:
+    - step: &build-and-push-ecr-quick
+        name: Quick Build and Push to AWS ECR
+        image: atlassian/default-image:4
+        services:
+          - docker
+        size: 2x
+        script:
+          - export DEBIAN_FRONTEND=noninteractive
+          - export TZ=Asia/Bangkok
+          - apt-get update
+          - apt-get install -y --no-install-recommends awscli
+          - aws --version
+          - export AWS_DEFAULT_REGION=$AWS_REGION
+          - aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
+          - aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
+          - aws configure set default.region $AWS_REGION
+          - aws sts get-caller-identity
+          - aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+          - aws ecr describe-repositories --repository-names $ECR_REPOSITORY --region $AWS_REGION || aws ecr create-repository --repository-name $ECR_REPOSITORY --region $AWS_REGION
+          - export IMAGE_TAG=${BITBUCKET_COMMIT:0:8}
+          - export ECR_REGISTRY=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+          - export FULL_IMAGE_URI=$ECR_REGISTRY/$ECR_REPOSITORY
+          - echo "Building Docker image..."
+          - docker build --build-arg DEBIAN_FRONTEND=noninteractive --build-arg TZ=Asia/Bangkok -t $ECR_REPOSITORY:local .
+          - docker tag $ECR_REPOSITORY:local $FULL_IMAGE_URI:$IMAGE_TAG
+          - docker tag $ECR_REPOSITORY:local $FULL_IMAGE_URI:latest
+          - echo "Pushing to ECR..."
+          - docker push $FULL_IMAGE_URI:$IMAGE_TAG
+          - docker push $FULL_IMAGE_URI:latest
+          - echo "BUILD SUCCESSFUL!"
+          - echo "Image URI $FULL_IMAGE_URI:$IMAGE_TAG"
+
+pipelines:
+  default:
+    - step: *build-and-push-ecr-quick
+  
+  branches:
+    main:
+      - step: 
+          <<: *build-and-push-ecr-quick
+          name: Deploy to Production ECR
+          
+    develop:
+      - step: 
+          <<: *build-and-push-ecr-quick
+          name: Deploy to Development ECR

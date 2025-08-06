@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  nhamaew-pet-store:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - NEXT_TELEMETRY_DISABLED=1
+      - LINE_CLIENT_ID=2005794867
+      - LINE_CLIENT_SECRET=5d0384fdfc92dd032fd01f6536227183
+      - NEXTAUTH_SECRET="your-secret-key"
+      - NEXT_PUBLIC_API_URL=https://test.nhamaew.net/
+      - NEXT_PUBLIC_IMAGE_HOST=nhamaew-bucket.s3.ap-southeast-1.amazonaws.com
+      - NEXT_PUBLIC_IMAGE_HOST2=s3.ap-southeast-1.amazonaws.com
+      - NEXT_PUBLIC_IMAGE_HOST_LINE=profile.line-scdn.net
+      - NEXT_PUBLIC_LIFF_ID=2005794867-OZWq52yD
+    restart: unless-stopped
+    container_name: nhamaew-pet-store
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:3000/" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
