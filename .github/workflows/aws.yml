@@ -21,6 +21,33 @@ jobs:
       name: production  # ต้องตรงกับชื่อ environment ใน GitHub
 
     steps:
+    - name: Check Environment Variables and Secrets
+      run: |
+        echo "=== Environment Variables ==="
+        echo "AWS_REGION: ${{ env.AWS_REGION }}"
+        echo "ECR_REPOSITORY: ${{ env.ECR_REPOSITORY }}"
+        
+        echo "=== Secrets Check ==="
+        if [ -z "${{ secrets.AWS_ACCESS_KEY_ID }}" ]; then
+          echo "❌ AWS_ACCESS_KEY_ID secret is NOT set"
+        else
+          echo "✅ AWS_ACCESS_KEY_ID secret is set"
+          echo "   Length: $(echo '${{ secrets.AWS_ACCESS_KEY_ID }}' | wc -c) characters"
+          echo "   Starts with: $(echo '${{ secrets.AWS_ACCESS_KEY_ID }}' | cut -c1-4)****"
+        fi
+        
+        if [ -z "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ]; then
+          echo "❌ AWS_SECRET_ACCESS_KEY secret is NOT set"
+        else
+          echo "✅ AWS_SECRET_ACCESS_KEY secret is set"
+          echo "   Length: $(echo '${{ secrets.AWS_SECRET_ACCESS_KEY }}' | wc -c) characters"
+        fi
+        
+        echo "=== GitHub Context ==="
+        echo "Repository: ${{ github.repository }}"
+        echo "Branch: ${{ github.ref_name }}"
+        echo "Event: ${{ github.event_name }}"
+
     - name: Checkout code
       uses: actions/checkout@v4
 
