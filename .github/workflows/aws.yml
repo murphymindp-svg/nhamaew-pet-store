@@ -18,7 +18,7 @@ jobs:
   build-and-push:
     name: Build and Push Docker Image
     runs-on: ubuntu-latest
-    environment: test  # ต้องระบุ environment ถ้า secrets อยู่ใน environment
+    environment: test  # ระบุ environment ถ้า secrets อยู่ใน environment
 
     steps:
     - name: Check Environment Variables and Secrets
@@ -33,7 +33,7 @@ jobs:
         
         echo "=== Environment Info ==="
         echo "Current environment: ${{ github.environment }}"
-        echo "Job environment: production"
+        echo "Job environment: test"
         
         echo "=== All Environment Variables ==="
         printenv | grep -E "AWS_|GITHUB_" | sort
@@ -46,12 +46,11 @@ jobs:
       with:
         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ap-southeast-1
+        aws-region: ${{ env.AWS_REGION }}
         mask-aws-account-id: 'no'
 
     - name: Test AWS credentials
       run: |
-        # เช็คว่า credentials ถูกตั้งค่าหรือไม่ (โดยไม่แสดงค่าจริง)
         if [ -z "$AWS_ACCESS_KEY_ID" ]; then
           echo "❌ AWS_ACCESS_KEY_ID is empty or not set"
         else
@@ -65,10 +64,6 @@ jobs:
           echo "✅ AWS_SECRET_ACCESS_KEY is set (length: ${#AWS_SECRET_ACCESS_KEY} characters)"
         fi
         
-        echo "AWS Region: ap-southeast-1"
-        echo "ECR Repository: nhamaew/pet-store"
-        
-        # ทดสอบ AWS CLI
         aws sts get-caller-identity
       env:
         AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -84,23 +79,40 @@ jobs:
         ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         IMAGE_TAG: ${{ github.sha }}
       run: |
-        # Build Docker image
         docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
         docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
-        
-        # Push images to ECR
         docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
         docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
-        
-        # Output image URI
         echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+    - name: Wait for App Runner service to be RUNNING
+      run: |
+        SERVICE_ARN="arn:aws:apprunner:${{ env.AWS_REGION }}:${{ env.AWS_ACCOUNT_ID }}:service/nhamaew-pet-store-test"
+        
+        echo "⏳ Checking App Runner service status..."
+        for i in {1..30}; do
+          STATUS=$(aws apprunner describe-service \
+            --service-arn $SERVICE_ARN \
+            --region ${{ env.AWS_REGION }} \
+            --query 'Service.Status' --output text)
+          
+          echo "Current status: $STATUS"
+          
+          if [ "$STATUS" == "RUNNING" ]; then
+            echo "✅ App Runner service is RUNNING"
+            break
+          elif [ "$STATUS" == "FAILED" ]; then
+            echo "❌ Service is in FAILED state. Aborting deployment."
+            exit 1
+          fi
+          
+          sleep 10
+        done
 
     - name: Deploy to AWS App Runner
       run: |
-        # Get current service configuration
         SERVICE_ARN="arn:aws:apprunner:${{ env.AWS_REGION }}:${{ env.AWS_ACCOUNT_ID }}:service/nhamaew-pet-store-test"
         
-        # Start a new deployment
         aws apprunner start-deployment \
           --service-arn $SERVICE_ARN \
           --region ${{ env.AWS_REGION }}
@@ -110,4 +122,4 @@ jobs:
         echo "📦 Image: $ECR_REGISTRY/$ECR_REPOSITORY:latest"
 
     - name: Image digest
-      run: echo "Image pushed successfully to ECR and App Runner deployment started"
+      run: echo "✅ Image pushed successfully to ECR and App Runner deployment started"
