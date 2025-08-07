@@ -71,4 +71,4 @@ EXPOSE 3000
 # Remove custom healthcheck - App Runner has its own health check mechanism
 # HEALTHCHECK commands are ignored in App Runner
 
-CMD ["npm", "start", "--", "-H", "0.0.0.0", "-p", "3000"]
+CMD ["node", "server.js"]
