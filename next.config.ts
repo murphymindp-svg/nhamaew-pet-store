@@ -32,6 +32,9 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  env: {
+    TZ: process.env.TZ || 'Asia/Bangkok',
+  },
   compiler: {
     removeConsole: true,
   },

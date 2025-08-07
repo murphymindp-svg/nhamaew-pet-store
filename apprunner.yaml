@@ -1,0 +1,19 @@
+version: 1.0
+runtime: docker
+build:
+  commands:
+    build:
+      - echo "Building Next.js application"
+run:
+  runtime-version: latest
+  command: node server.js
+  network:
+    port: 3000
+    env: PORT
+  env:
+    - name: NODE_ENV
+      value: production
+    - name: NEXT_TELEMETRY_DISABLED
+      value: 1
+    - name: TZ
+      value: Asia/Bangkok

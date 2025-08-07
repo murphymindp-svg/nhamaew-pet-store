@@ -14,8 +14,8 @@ WORKDIR /app
 COPY package.json yarn.lock* package-lock.json* pnpm-lock.yaml* ./
 RUN \
   if [ -f yarn.lock ]; then yarn --frozen-lockfile; \
-  elif [ -f package-lock.json ]; then npm install --production=false && npm ci --only=production; \
-  elif [ -f pnpm-lock.yaml ]; then npm install -g pnpm && pnpm i --frozen-lockfile; \
+  elif [ -f package-lock.json ]; then npm ci --only=production; \
+  elif [ -f pnpm-lock.yaml ]; then corepack enable && pnpm i --frozen-lockfile; \
   else echo "Lockfile not found." && exit 1; \
   fi
 
@@ -32,7 +32,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN \
   if [ -f yarn.lock ]; then yarn build; \
   elif [ -f package-lock.json ]; then npm run build; \
-  elif [ -f pnpm-lock.yaml ]; then pnpm build; \
+  elif [ -f pnpm-lock.yaml ]; then corepack enable && pnpm build; \
   else echo "No package manager detected" && exit 1; \
   fi
 
@@ -42,8 +42,11 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
+# AWS App Runner provides PORT via environment variable
+ENV PORT=${PORT:-3000}
+ENV HOSTNAME="0.0.0.0"
 
-# Create nextjs user
+# Create nextjs user (App Runner runs as non-root by default)
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
@@ -59,15 +62,13 @@ RUN chown nextjs:nodejs .next
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
+# Switch to non-root user
 USER nextjs
 
-EXPOSE 8080
+# App Runner automatically assigns port, but we expose 3000 as default
+EXPOSE 3000
 
-ENV PORT=8080
-ENV HOSTNAME="0.0.0.0"
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD node healthcheck.js || exit 1
+# Remove custom healthcheck - App Runner has its own health check mechanism
+# HEALTHCHECK commands are ignored in App Runner
 
 CMD ["node", "server.js"]
